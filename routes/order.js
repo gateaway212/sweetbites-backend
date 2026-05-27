@@ -7,7 +7,6 @@ router.post('/create', async (req, res) => {
     try {
         const { userId, items, totalAmount, shippingAddress, paymentStatus } = req.body;
 
-        // Naya order create karo
         const newOrder = new Order({
             userId,
             items,
@@ -16,7 +15,6 @@ router.post('/create', async (req, res) => {
             paymentStatus: paymentStatus || 'Paid' // Razorpay status ke liye
         });
 
-        // Database mein save karo
         await newOrder.save();
 
         res.status(201).json({ message: 'Order saved successfully! 🥳', order: newOrder });
@@ -27,10 +25,9 @@ router.post('/create', async (req, res) => {
     }
 });
 
-// 🌟 API to Get User's Orders (Profile page ke liye)
+// 🌟 API to Get User's Orders 
 router.get('/myorders/:userId', async (req, res) => {
     try {
-        // Sirf is specific user ke orders nikalo, latest wale pehle (sort -1)
         const orders = await Order.find({ userId: req.params.userId }).sort({ createdAt: -1 });
         res.status(200).json(orders);
     } catch (error) {
@@ -38,11 +35,7 @@ router.get('/myorders/:userId', async (req, res) => {
     }
 });
 
-// ==========================================
-// 👑 ADMIN APIS (Naya Code Yahan Aaya Hai)
-// ==========================================
 
-// 🌟 1. ADMIN ROUTE: Saare orders fetch karne ke liye (Sabse naye pehle aayenge)
 router.get('/admin/all-orders', async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 }); 
@@ -52,7 +45,7 @@ router.get('/admin/all-orders', async (req, res) => {
   }
 });
 
-// 🌟 2. ADMIN ROUTE: Order ka status update karne ke liye
+
 router.put('/admin/update-status/:id', async (req, res) => {
   try {
     const { status } = req.body;
@@ -67,5 +60,43 @@ router.put('/admin/update-status/:id', async (req, res) => {
   }
 });
 
-// Sabse last mein export
+// 📊 ADMIN ROUTE: Sales and Revenue Report generate karne ke liye
+router.get('/admin/sales-report-analytics', async (req, res) => {
+  try {
+    // MongoDB aggregation to calculate date-wise revenue and order count
+    const salesReport = await Order.aggregate([
+      { $match: { status: 'Delivered' } }, // Sirf delivered orders se revenue calculate hoga
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          totalRevenue: { $sum: "$totalAmount" },
+          totalOrders: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: -1 } } // Newest dates first
+    ]);
+
+    // Calculate lifetime totals
+    const totalStats = await Order.aggregate([
+      {
+        $group: {
+          _id: null,
+          lifetimeRevenue: { $sum: { $cond: [{ $eq: ["$status", "Delivered"] }, "$totalAmount", 0] } },
+          totalOrdersCount: { $sum: 1 },
+          deliveredCount: { $sum: { $cond: [{ $eq: ["$status", "Delivered"] }, 1, 0] } },
+          pendingCount: { $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] } }
+        }
+      }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      dailyAnalytics: salesReport,
+      summary: totalStats[0] || { lifetimeRevenue: 0, totalOrdersCount: 0, deliveredCount: 0, pendingCount: 0 }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Failed to generate sales report" });
+  }
+});
+
 module.exports = router;
